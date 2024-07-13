@@ -90,19 +90,19 @@ func (t *TCPTransport) Close() error {
 }
 
 // Dial implements the Transport interface.
-func (t *TCPTransport) Dial(addr string, connType string, opts DialOptions) error {
-	log.Printf("Dialing %s with connection type %s, int value %d, and extra info %s\n", addr, connType, opts.IntValue, opts.ExtraInfo)
+func (t *TCPTransport) Dial(addr string, connType string, dialopts DialOptions) error {
+
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
 		return err
 	}
 
-	go t.handleConn(conn, true, connType, opts)
+	go t.handleConn(conn, true, connType, dialopts)
 
 	return nil
 }
 
-func (s *TCPTransport) ListenAndAccept(connType string, opts DialOptions) error {
+func (s *TCPTransport) ListenAndAccept(connType string, dial DialOptions) error {
 	var err error
 
 	s.listener, err = net.Listen("tcp", s.ListenAddr)
@@ -110,7 +110,7 @@ func (s *TCPTransport) ListenAndAccept(connType string, opts DialOptions) error 
 		return err
 	}
 
-	go s.startAcceptLoop(connType, opts)
+	go s.startAcceptLoop(connType, dial)
 
 	log.Printf("TCP transport listening on port: %s\n", s.ListenAddr)
 
@@ -136,31 +136,31 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool, connType string,
 	var err error
 
 	defer func() {
-		if err != nil {
-			fmt.Printf("dropping peer connection due to error: %s\n", err)
-		} else {
-			fmt.Println("dropping peer connection gracefully")
-		}
+		fmt.Printf("dropping peer connection: %s", err)
 		conn.Close()
 	}()
 
 	peer := NewTCPPeer(conn, outbound)
 
+	// we use this to connect the peres map and the peer created in the hanndleConn
 	if t.OnPeer != nil {
 		if err = t.OnPeer(peer, connType); err != nil {
 			return
 		}
 	}
 
+	// Read loop
 	for {
 		msg := msg{}
-		log.Printf("go routine with int value: %d and extra info: %s\n", opts.IntValue, opts.ExtraInfo)
+		log.Println("go routine of ", opts.IntValue)
 		err = t.Decoder.Reader(conn, &msg)
 		if err != nil {
 			return
 		}
 		msg.From = conn.RemoteAddr().String()
+		// log.Println(msg, "This message is sent by", conn.LocalAddr().String())
 
+		//if the peer is sending the incoming stream then it will wait and we will handle it in the logic
 		if msg.Stream {
 			peer.wg.Add(1)
 			fmt.Printf("[%s] incoming stream, waiting... %s [%d]\n", conn.RemoteAddr(), opts.ExtraInfo, opts.IntValue)
@@ -172,5 +172,6 @@ func (t *TCPTransport) handleConn(conn net.Conn, outbound bool, connType string,
 		if len(msg.Payload) > 1 {
 			t.msgch <- msg
 		}
+
 	}
 }
